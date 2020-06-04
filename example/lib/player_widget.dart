@@ -39,8 +39,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   StreamSubscription _playerStateSubscription;
 
   get _isPlaying => _playerState == PlayerState.playing;
+
   get _isPaused => _playerState == PlayerState.paused;
+
   get _durationText => _duration?.toString()?.split('.')?.first ?? '';
+
   get _positionText => _position?.toString()?.split('.')?.first ?? '';
 
   get _isPlayingThroughEarpiece =>
@@ -157,8 +160,10 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             artist: 'Artist or blank',
             albumTitle: 'Name or blank',
             imageUrl: 'url or blank',
-            forwardSkipInterval: const Duration(seconds: 30), // default is 30s
-            backwardSkipInterval: const Duration(seconds: 30), // default is 30s
+            forwardSkipInterval: const Duration(seconds: 30),
+            // default is 30s
+            backwardSkipInterval: const Duration(seconds: 30),
+            // default is 30s
             duration: duration,
             elapsedTime: Duration(seconds: 0));
       }
@@ -190,6 +195,22 @@ class _PlayerWidgetState extends State<PlayerWidget> {
       if (!mounted) return;
       setState(() {
         _audioPlayerState = state;
+        switch (state) {
+          case AudioPlayerState.STOPPED:
+            _playerState = PlayerState.stopped;
+            break;
+          case AudioPlayerState.PLAYING:
+            _playerState = PlayerState.playing;
+            break;
+          case AudioPlayerState.PAUSED:
+            _playerState = PlayerState.paused;
+
+            break;
+          case AudioPlayerState.COMPLETED:
+            _playerState = PlayerState.stopped;
+
+            break;
+        }
       });
     });
 

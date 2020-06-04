@@ -1,15 +1,18 @@
 package xyz.luan.audioplayers;
 
 import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.PowerManager;
 import android.content.Context;
+import android.util.Log;
 
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 
-public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPreparedListener, MediaPlayer.OnCompletionListener, MediaPlayer.OnSeekCompleteListener {
+public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPreparedListener, MediaPlayer.OnCompletionListener, MediaPlayer.OnSeekCompleteListener, AudioManager.OnAudioFocusChangeListener {
 
     private String playerId;
 
@@ -29,11 +32,79 @@ public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPrepared
 
     private MediaPlayer player;
     private AudioplayersPlugin ref;
+    private WeakReference<AudioManager> audioManager;
+    private AudioFocusRequest audioFocusRequest;
 
-    WrappedMediaPlayer(AudioplayersPlugin ref, String playerId) {
+    WrappedMediaPlayer(AudioplayersPlugin ref, String playerId, AudioManager audioManager) {
         this.ref = ref;
         this.playerId = playerId;
+        this.audioManager = new WeakReference<AudioManager>(audioManager);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build();
+            audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(audioAttributes)
+                    .setAcceptsDelayedFocusGain(true)
+                    .setOnAudioFocusChangeListener(this)
+                    .build();
+        }
     }
+
+    private void requestAudioFocus() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            int res = audioManager.get().requestAudioFocus(audioFocusRequest);
+        } else {
+            int res = audioManager.get().requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+            switch (res) {
+                case AudioManager.AUDIOFOCUS_REQUEST_GRANTED:
+                    break;
+                case AudioManager.AUDIOFOCUS_REQUEST_DELAYED:
+                    break;
+                case AudioManager.AUDIOFOCUS_REQUEST_FAILED:
+                    break;
+                case AudioManager.AUDIOFOCUS_LOSS:
+                    break;
+            }
+        }
+    }
+
+    private void abandonFocus() {
+        int res;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            res = audioManager.get().abandonAudioFocusRequest(audioFocusRequest);
+        } else {
+            res = audioManager.get().abandonAudioFocus(this);
+        }
+    }
+
+    @Override
+    public void onAudioFocusChange(int focusChange) {
+        switch (focusChange) {
+            case AudioManager.AUDIOFOCUS_GAIN:
+                // 标记自己获取到焦点
+                ref.handleAudioFocusState(this, AudioManager.AUDIOFOCUS_GAIN);
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS:
+                // 标记自己失去焦点
+                /*
+                 * 1、暂停音频播放
+                 * 2、修改播放状态*/
+                pause();
+                ref.handleAudioFocusState(this, AudioManager.AUDIOFOCUS_LOSS);
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                // 短暂失去焦点
+                /*需要降低音量，但是不暂停，暂时不实现它*/
+                // ref.handleAudioFocusState(this,AudioManager.AUDIOFOCUS_LOSS_TRANSIENT);
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                // ... pausing or ducking depends on your app
+                break;
+        }
+    }
+
 
     /**
      * Setter methods
@@ -170,6 +241,7 @@ public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPrepared
     @Override
     void play(Context context) {
         if (!this.playing) {
+            requestAudioFocus();
             this.playing = true;
             if (this.released) {
                 this.released = false;
@@ -198,6 +270,7 @@ public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPrepared
         } else {
             this.release();
         }
+        abandonFocus();
     }
 
     @Override
@@ -224,6 +297,7 @@ public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPrepared
             this.playing = false;
             this.player.pause();
         }
+        abandonFocus();
     }
 
     // seek operations cannot be called until after
@@ -295,19 +369,19 @@ public class WrappedMediaPlayer extends Player implements MediaPlayer.OnPrepared
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             if (objectEquals(this.playingRoute, "speakers")) {
                 player.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(respectSilence ? AudioAttributes.USAGE_NOTIFICATION_RINGTONE : AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
+                        .setUsage(respectSilence ? AudioAttributes.USAGE_NOTIFICATION_RINGTONE : AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
                 );
             } else {
                 // Works with bluetooth headphones
                 // automatically switch to earpiece when disconnect bluetooth headphones
                 player.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
                 );
-                if ( context != null ) {
+                if (context != null) {
                     AudioManager mAudioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
                     mAudioManager.setSpeakerphoneOn(false);
                 }

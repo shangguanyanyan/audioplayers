@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 import 'dart:ui';
 
@@ -592,6 +593,11 @@ class AudioPlayer {
         player._errorController.add(value);
         // ignore: deprecated_member_use_from_same_package
         player.errorHandler?.call(value);
+        break;
+      case 'audio.audioFocus':
+        if(value == "AUDIOFOCUS_LOSS"){
+          player.state = AudioPlayerState.PAUSED;
+        }else if(value == "AUDIOFOCUS_GAIN"){}
         break;
       default:
         _log('Unknown method ${call.method} ');

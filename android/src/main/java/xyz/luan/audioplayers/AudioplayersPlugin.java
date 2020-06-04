@@ -1,5 +1,7 @@
 package xyz.luan.audioplayers;
 
+import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.os.Build;
 import android.content.Context;
 import android.os.Handler;
@@ -10,6 +12,7 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import io.flutter.Log;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
@@ -134,10 +137,12 @@ public class AudioplayersPlugin implements MethodCallHandler {
     }
 
     private Player getPlayer(String playerId, String mode) {
+        AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        new WrappedMediaPlayer(this, playerId, audioManager);
         if (!mediaPlayers.containsKey(playerId)) {
             Player player =
                     mode.equalsIgnoreCase("PlayerMode.MEDIA_PLAYER") ?
-                            new WrappedMediaPlayer(this, playerId) :
+                            new WrappedMediaPlayer(this, playerId, audioManager) :
                             new WrappedSoundPool(this, playerId);
             mediaPlayers.put(playerId, player);
         }
@@ -154,6 +159,14 @@ public class AudioplayersPlugin implements MethodCallHandler {
 
     public void handleCompletion(Player player) {
         channel.invokeMethod("audio.onComplete", buildArguments(player.getPlayerId(), true));
+    }
+
+    public void handleAudioFocusState(Player player, int state) {
+        if (state == AudioManager.AUDIOFOCUS_LOSS) {
+            channel.invokeMethod("audio.audioFocus", buildArguments(player.getPlayerId(), "AUDIOFOCUS_LOSS"));
+        } else if (state == AudioManager.AUDIOFOCUS_GAIN) {
+            channel.invokeMethod("audio.audioFocus", buildArguments(player.getPlayerId(), "AUDIOFOCUS_GAIN"));
+        }
     }
 
     public void handleSeekComplete(Player player) {
