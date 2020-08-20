@@ -3,8 +3,11 @@ package xyz.luan.audioplayers;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
 import android.os.Build;
+
 import android.content.Context;
 import android.os.Handler;
+
+import androidx.annotation.NonNull;
 
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
@@ -13,20 +16,22 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import io.flutter.Log;
+import io.flutter.embedding.engine.plugins.FlutterPlugin;
+
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 
-public class AudioplayersPlugin implements MethodCallHandler {
+public class AudioplayersPlugin implements MethodCallHandler, FlutterPlugin {
 
     private static final Logger LOGGER = Logger.getLogger(AudioplayersPlugin.class.getCanonicalName());
 
-    private final MethodChannel channel;
+    private MethodChannel channel;
     private final Map<String, Player> mediaPlayers = new HashMap<>();
     private final Handler handler = new Handler();
     private Runnable positionUpdates;
-    private final Context context;
+    private Context context;
     private boolean seekFinish;
 
     public static void registerWith(final Registrar registrar) {
@@ -40,6 +45,20 @@ public class AudioplayersPlugin implements MethodCallHandler {
         this.context = context;
         this.seekFinish = false;
     }
+
+    public AudioplayersPlugin() {}
+
+    @Override
+    public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+        final MethodChannel channel = new MethodChannel(binding.getBinaryMessenger(), "xyz.luan/audioplayers");
+        this.channel = channel;
+        this.context = binding.getApplicationContext();
+        this.seekFinish = false;
+        channel.setMethodCallHandler(this);
+    }
+
+    @Override
+    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {}
 
     @Override
     public void onMethodCall(final MethodCall call, final MethodChannel.Result response) {
@@ -161,12 +180,17 @@ public class AudioplayersPlugin implements MethodCallHandler {
         channel.invokeMethod("audio.onComplete", buildArguments(player.getPlayerId(), true));
     }
 
+
     public void handleAudioFocusState(Player player, int state) {
         if (state == AudioManager.AUDIOFOCUS_LOSS) {
             channel.invokeMethod("audio.audioFocus", buildArguments(player.getPlayerId(), "AUDIOFOCUS_LOSS"));
         } else if (state == AudioManager.AUDIOFOCUS_GAIN) {
             channel.invokeMethod("audio.audioFocus", buildArguments(player.getPlayerId(), "AUDIOFOCUS_GAIN"));
         }
+    }
+
+    public void handleError(Player player, String message) {
+        channel.invokeMethod("audio.onError", buildArguments(player.getPlayerId(), message));
     }
 
     public void handleSeekComplete(Player player) {

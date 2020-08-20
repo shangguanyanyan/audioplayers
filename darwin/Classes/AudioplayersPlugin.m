@@ -55,6 +55,7 @@ NSString *_artist;
 NSString *_imageUrl;
 int _duration;
 const float _defaultPlaybackRate = 1.0;
+const NSString *_defaultPlayingRoute = @"speakers";
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
   _registrar = registrar;
@@ -163,15 +164,18 @@ const float _defaultPlaybackRate = 1.0;
                         result(0);
                     if (call.arguments[@"respectSilence"] == nil)
                         result(0);
+                    if (call.arguments[@"recordingActive"] == nil)
+                        result(0);
                     int isLocal = [call.arguments[@"isLocal"]intValue] ;
                     float volume = (float)[call.arguments[@"volume"] doubleValue] ;
                     int milliseconds = call.arguments[@"position"] == [NSNull null] ? 0.0 : [call.arguments[@"position"] intValue] ;
-                    bool respectSilence = [call.arguments[@"respectSilence"]boolValue] ;
+                    bool respectSilence = [call.arguments[@"respectSilence"] boolValue];
+                    bool recordingActive = [call.arguments[@"recordingActive"] boolValue];
                     CMTime time = CMTimeMakeWithSeconds(milliseconds / 1000,NSEC_PER_SEC);
                     NSLog(@"isLocal: %d %@", isLocal, call.arguments[@"isLocal"] );
                     NSLog(@"volume: %f %@", volume, call.arguments[@"volume"] );
                     NSLog(@"position: %d %@", milliseconds, call.arguments[@"positions"] );
-                    [self play:playerId url:url isLocal:isLocal volume:volume time:time isNotification:respectSilence];
+                    [self play:playerId url:url isLocal:isLocal volume:volume time:time isNotification:respectSilence recordingActive:recordingActive];
                   },
                 @"pause":
                   ^{
@@ -210,10 +214,12 @@ const float _defaultPlaybackRate = 1.0;
                     NSString *url = call.arguments[@"url"];
                     int isLocal = [call.arguments[@"isLocal"]intValue];
                     bool respectSilence = [call.arguments[@"respectSilence"]boolValue] ;
+                    bool recordingActive = [call.arguments[@"recordingActive"]boolValue] ;
                     [ self setUrl:url
                           isLocal:isLocal
                           isNotification:respectSilence
                           playerId:playerId
+                          recordingActive: recordingActive
                           onReady:^(NSString * playerId) {
                             result(@(1));
                           }
@@ -271,6 +277,12 @@ const float _defaultPlaybackRate = 1.0;
                     NSString *releaseMode = call.arguments[@"releaseMode"];
                     bool looping = [releaseMode hasSuffix:@"LOOP"];
                     [self setLooping:looping playerId:playerId];
+                  },
+                @"earpieceOrSpeakersToggle":
+                  ^{
+                    NSLog(@"earpieceOrSpeakersToggle");
+                    NSString *playingRoute = call.arguments[@"playingRoute"];
+                    [self setPlayingRoute:playingRoute playerId:playerId];
                   }
                 };
 
@@ -288,7 +300,7 @@ const float _defaultPlaybackRate = 1.0;
 -(void) initPlayerInfo: (NSString *) playerId {
   NSMutableDictionary * playerInfo = players[playerId];
   if (!playerInfo) {
-    players[playerId] = [@{@"isPlaying": @false, @"volume": @(1.0), @"rate": @(_defaultPlaybackRate), @"looping": @(false)} mutableCopy];
+    players[playerId] = [@{@"isPlaying": @false, @"volume": @(1.0), @"rate": @(_defaultPlaybackRate), @"looping": @(false), @"playingRoute": _defaultPlayingRoute} mutableCopy];
   }
 }
 
@@ -336,6 +348,10 @@ const float _defaultPlaybackRate = 1.0;
           MPRemoteCommand *togglePlayPauseCommand = [remoteCommandCenter togglePlayPauseCommand];
           [togglePlayPauseCommand setEnabled:YES];
           [togglePlayPauseCommand addTarget:self action:@selector(playOrPauseEvent:)];
+
+          MPRemoteCommand *changePlaybackPositionCommand = [remoteCommandCenter changePlaybackPositionCommand];
+          [changePlaybackPositionCommand setEnabled:YES];
+          [changePlaybackPositionCommand addTarget:self action:@selector(onChangePlaybackPositionCommand:)];
         }
     }
 
@@ -371,6 +387,7 @@ const float _defaultPlaybackRate = 1.0;
         }
         return MPRemoteCommandHandlerStatusSuccess;
     }
+
     -(MPRemoteCommandHandlerStatus) playOrPauseEvent: (MPSkipIntervalCommandEvent *) playOrPauseEvent {
         NSLog(@"playOrPauseEvent");
 
@@ -398,6 +415,13 @@ const float _defaultPlaybackRate = 1.0;
         if (headlessServiceInitialized) {
           [_callbackChannel invokeMethod:@"audio.onNotificationBackgroundPlayerStateChanged" arguments:@{@"playerId": _currentPlayerId, @"updateHandleMonitorKey": @(_updateHandleMonitorKey), @"value": playerState}];
         }
+        return MPRemoteCommandHandlerStatusSuccess;
+    }
+
+    -(MPRemoteCommandHandlerStatus) onChangePlaybackPositionCommand: (MPChangePlaybackPositionCommandEvent *) changePositionEvent {
+        NSLog(@"changePlaybackPosition to %f", changePositionEvent.positionTime);
+        CMTime newTime = CMTimeMakeWithSeconds(changePositionEvent.positionTime, NSEC_PER_SEC);
+        [ self seek:_currentPlayerId time:newTime ];
         return MPRemoteCommandHandlerStatusSuccess;
     }
 
@@ -436,6 +460,7 @@ const float _defaultPlaybackRate = 1.0;
        isLocal: (bool) isLocal
        isNotification: (bool) respectSilence
        playerId: (NSString*) playerId
+       recordingActive: (bool) recordingActive
        onReady:(VoidCallback)onReady
 {
   NSMutableDictionary * playerInfo = players[playerId];
@@ -449,8 +474,13 @@ const float _defaultPlaybackRate = 1.0;
       // code moved from play() to setUrl() to fix the bug of audio not playing in ios background
       NSError *error = nil;
       BOOL success = false;
-
-      AVAudioSessionCategory category = respectSilence ? AVAudioSessionCategoryAmbient : AVAudioSessionCategoryPlayback;
+    
+      AVAudioSessionCategory category;
+      if (recordingActive) {
+        category = AVAudioSessionCategoryPlayAndRecord;
+      } else {
+        category = respectSilence ? AVAudioSessionCategoryAmbient : AVAudioSessionCategoryPlayback;
+      }
       // When using AVAudioSessionCategoryPlayback, by default, this implies that your app’s audio is nonmixable—activating your session
       // will interrupt any other audio sessions which are also nonmixable. AVAudioSessionCategoryPlayback should not be used with
       // AVAudioSessionCategoryOptionMixWithOthers option. If so, it prevents infoCenter from working correctly.
@@ -458,8 +488,14 @@ const float _defaultPlaybackRate = 1.0;
         success = [[AVAudioSession sharedInstance] setCategory:category withOptions:AVAudioSessionCategoryOptionMixWithOthers error:&error];
       } else {
         success = [[AVAudioSession sharedInstance] setCategory:category error:&error];
+        [[UIApplication sharedApplication] beginReceivingRemoteControlEvents];
       }
-    
+      
+      if ([playerInfo[@"playingRoute"] isEqualToString:@"earpiece"]) {
+        // Use earpiece speaker to play audio.
+        success = [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord error:&error];
+      }
+
       if (!success) {
         NSLog(@"Error setting speaker: %@", error);
       }
@@ -476,7 +512,7 @@ const float _defaultPlaybackRate = 1.0;
     }
       
     if (playerInfo[@"url"]) {
-      [[player currentItem] removeObserver:self forKeyPath:@"player.currentItem.status" ];
+      [[player currentItem] removeObserver:self forKeyPath:@"status" ];
 
       [ playerInfo setObject:url forKey:@"url" ];
 
@@ -512,7 +548,7 @@ const float _defaultPlaybackRate = 1.0;
     // is sound ready
     [playerInfo setObject:onReady forKey:@"onReady"];
     [playerItem addObserver:self
-                          forKeyPath:@"player.currentItem.status"
+                          forKeyPath:@"status"
                           options:0
                           context:(void*)playerId];
       
@@ -529,11 +565,13 @@ const float _defaultPlaybackRate = 1.0;
       volume: (float) volume
         time: (CMTime) time
       isNotification: (bool) respectSilence
+recordingActive: (bool) recordingActive
 {
   [ self setUrl:url
          isLocal:isLocal
          isNotification:respectSilence
          playerId:playerId
+         recordingActive: recordingActive
          onReady:^(NSString * playerId) {
            NSMutableDictionary * playerInfo = players[playerId];
            AVPlayer *player = playerInfo[@"player"];
@@ -655,6 +693,25 @@ const float _defaultPlaybackRate = 1.0;
   [playerInfo setObject:@(looping) forKey:@"looping"];
 }
 
+-(void) setPlayingRoute: (NSString *) playingRoute
+               playerId: (NSString *) playerId {
+  NSLog(@"%@ -> calling setPlayingRoute", osName);
+  NSMutableDictionary *playerInfo = players[playerId];
+  [playerInfo setObject:(playingRoute) forKey:@"playingRoute"];
+
+  BOOL success = false;
+  NSError *error = nil;
+  if ([playingRoute isEqualToString:@"earpiece"]) {
+    // Use earpiece speaker to play audio.
+    success = [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayAndRecord error:&error];
+  } else {
+    success = [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:&error];
+  }
+  if (!success) {
+    NSLog(@"Error setting playing route: %@", error);
+  }
+} 
+
 -(void) stop: (NSString *) playerId {
   NSMutableDictionary * playerInfo = players[playerId];
 
@@ -721,7 +778,7 @@ const float _defaultPlaybackRate = 1.0;
                      ofObject:(id)object
                        change:(NSDictionary *)change
                       context:(void *)context {
-  if ([keyPath isEqualToString: @"player.currentItem.status"]) {
+  if ([keyPath isEqualToString: @"status"]) {
     NSString *playerId = (__bridge NSString*)context;
     NSMutableDictionary * playerInfo = players[playerId];
     AVPlayer *player = playerInfo[@"player"];
