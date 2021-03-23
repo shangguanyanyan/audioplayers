@@ -11,9 +11,11 @@ class PlayerWidget extends StatefulWidget {
   final String url;
   final PlayerMode mode;
 
-  PlayerWidget(
-      {Key key, @required this.url, this.mode = PlayerMode.MEDIA_PLAYER})
-      : super(key: key);
+  PlayerWidget({
+    Key? key,
+    required this.url,
+    this.mode = PlayerMode.MEDIA_PLAYER,
+  }) : super(key: key);
 
   @override
   State<StatefulWidget> createState() {
@@ -25,25 +27,23 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   String url;
   PlayerMode mode;
 
-  AudioPlayer _audioPlayer;
-  AudioPlayerState _audioPlayerState;
-  Duration _duration;
-  Duration _position;
+  late AudioPlayer _audioPlayer;
+  AudioPlayerState? _audioPlayerState;
+  Duration? _duration;
+  Duration? _position;
 
   PlayerState _playerState = PlayerState.stopped;
   PlayingRouteState _playingRouteState = PlayingRouteState.speakers;
-  StreamSubscription _durationSubscription;
-  StreamSubscription _positionSubscription;
-  StreamSubscription _playerCompleteSubscription;
-  StreamSubscription _playerErrorSubscription;
-  StreamSubscription _playerStateSubscription;
+  StreamSubscription? _durationSubscription;
+  StreamSubscription? _positionSubscription;
+  StreamSubscription? _playerCompleteSubscription;
+  StreamSubscription? _playerErrorSubscription;
+  StreamSubscription? _playerStateSubscription;
+  StreamSubscription<PlayerControlCommand>? _playerControlCommandSubscription;
 
   get _isPlaying => _playerState == PlayerState.playing;
-
   get _isPaused => _playerState == PlayerState.paused;
-
   get _durationText => _duration?.toString()?.split('.')?.first ?? '';
-
   get _positionText => _position?.toString()?.split('.')?.first ?? '';
 
   get _isPlayingThroughEarpiece =>
@@ -59,12 +59,13 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
   @override
   void dispose() {
-    _audioPlayer.stop();
+    _audioPlayer.dispose();
     _durationSubscription?.cancel();
     _positionSubscription?.cancel();
     _playerCompleteSubscription?.cancel();
     _playerErrorSubscription?.cancel();
     _playerStateSubscription?.cancel();
+    _playerControlCommandSubscription?.cancel();
     super.dispose();
   }
 
@@ -116,15 +117,16 @@ class _PlayerWidgetState extends State<PlayerWidget> {
                 children: [
                   Slider(
                     onChanged: (v) {
-                      final Position = v * _duration.inMilliseconds;
+                      final Position = v * _duration!.inMilliseconds;
                       _audioPlayer
                           .seek(Duration(milliseconds: Position.round()));
                     },
                     value: (_position != null &&
                             _duration != null &&
-                            _position.inMilliseconds > 0 &&
-                            _position.inMilliseconds < _duration.inMilliseconds)
-                        ? _position.inMilliseconds / _duration.inMilliseconds
+                            _position!.inMilliseconds > 0 &&
+                            _position!.inMilliseconds <
+                                _duration!.inMilliseconds)
+                        ? _position!.inMilliseconds / _duration!.inMilliseconds
                         : 0.0,
                   ),
                 ],
@@ -133,7 +135,9 @@ class _PlayerWidgetState extends State<PlayerWidget> {
             Text(
               _position != null
                   ? '${_positionText ?? ''} / ${_durationText ?? ''}'
-                  : _duration != null ? _durationText : '',
+                  : _duration != null
+                      ? _durationText
+                      : '',
               style: TextStyle(fontSize: 24.0),
             ),
           ],
@@ -156,16 +160,17 @@ class _PlayerWidgetState extends State<PlayerWidget> {
 
         // set at least title to see the notification bar on ios.
         _audioPlayer.setNotification(
-            title: 'App Name',
-            artist: 'Artist or blank',
-            albumTitle: 'Name or blank',
-            imageUrl: 'url or blank',
-            forwardSkipInterval: const Duration(seconds: 30),
-            // default is 30s
-            backwardSkipInterval: const Duration(seconds: 30),
-            // default is 30s
-            duration: duration,
-            elapsedTime: Duration(seconds: 0));
+          title: 'App Name',
+          artist: 'Artist or blank',
+          albumTitle: 'Name or blank',
+          imageUrl: 'url or blank',
+          // forwardSkipInterval: const Duration(seconds: 30), // default is 30s
+          // backwardSkipInterval: const Duration(seconds: 30), // default is 30s
+          duration: duration,
+          elapsedTime: Duration(seconds: 0),
+          hasNextTrack: true,
+          hasPreviousTrack: false,
+        );
       }
     });
 
@@ -189,6 +194,11 @@ class _PlayerWidgetState extends State<PlayerWidget> {
         _duration = Duration(seconds: 0);
         _position = Duration(seconds: 0);
       });
+    });
+
+    _playerControlCommandSubscription =
+        _audioPlayer.onPlayerCommand.listen((command) {
+      print('command');
     });
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
@@ -225,8 +235,8 @@ class _PlayerWidgetState extends State<PlayerWidget> {
   Future<int> _play() async {
     final playPosition = (_position != null &&
             _duration != null &&
-            _position.inMilliseconds > 0 &&
-            _position.inMilliseconds < _duration.inMilliseconds)
+            _position!.inMilliseconds > 0 &&
+            _position!.inMilliseconds < _duration!.inMilliseconds)
         ? _position
         : null;
     final result = await _audioPlayer.play(url, position: playPosition);

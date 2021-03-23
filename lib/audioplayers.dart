@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -39,11 +40,18 @@ enum ReleaseMode {
   STOP
 }
 
-/// Self explanatory. Indicates the state of the audio player.
+/// Indicates the state of the audio player.
 enum AudioPlayerState {
+  /// Stop has been called or an error occurred.
   STOPPED,
+
+  /// Currently playing audio.
   PLAYING,
+
+  /// Pause has been called.
   PAUSED,
+
+  /// The audio successfully completed (reached the end).
   COMPLETED,
 }
 
@@ -70,6 +78,11 @@ enum PlayerMode {
   LOW_LATENCY
 }
 
+enum PlayerControlCommand {
+  NEXT_TRACK,
+  PREVIOUS_TRACK,
+}
+
 // When we start the background service isolate, we only ever enter it once.
 // To communicate between the native plugin and this entrypoint, we'll use
 // MethodChannels to open a persistent communication channel to trigger
@@ -84,25 +97,25 @@ void _backgroundCallbackDispatcher() {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Reference to the onAudioChangeBackgroundEvent callback.
-  Function(AudioPlayerState) onAudioChangeBackgroundEvent;
+  Function(AudioPlayerState)? onAudioChangeBackgroundEvent;
 
   // This is where the magic happens and we handle background events from the
   // native portion of the plugin. Here we message the audio notification data
   // which we then pass to the provided callback.
   _channel.setMethodCallHandler((MethodCall call) async {
-    Function _performCallbackLookup() {
+    Function(AudioPlayerState) _performCallbackLookup() {
       final CallbackHandle handle = CallbackHandle.fromRawHandle(
           call.arguments['updateHandleMonitorKey']);
 
       // PluginUtilities.getCallbackFromHandle performs a lookup based on the
       // handle we retrieved earlier.
-      final Function closure = PluginUtilities.getCallbackFromHandle(handle);
+      final Function? closure = PluginUtilities.getCallbackFromHandle(handle);
 
       if (closure == null) {
         print('Fatal Error: Callback lookup failed!');
         // exit(-1);
       }
-      return closure;
+      return closure as Function(AudioPlayerState);
     }
 
     final Map<dynamic, dynamic> callArgs = call.arguments as Map;
@@ -110,11 +123,11 @@ void _backgroundCallbackDispatcher() {
       onAudioChangeBackgroundEvent ??= _performCallbackLookup();
       final String playerState = callArgs['value'];
       if (playerState == 'playing') {
-        onAudioChangeBackgroundEvent(AudioPlayerState.PLAYING);
+        onAudioChangeBackgroundEvent!(AudioPlayerState.PLAYING);
       } else if (playerState == 'paused') {
-        onAudioChangeBackgroundEvent(AudioPlayerState.PAUSED);
+        onAudioChangeBackgroundEvent!(AudioPlayerState.PAUSED);
       } else if (playerState == 'completed') {
-        onAudioChangeBackgroundEvent(AudioPlayerState.COMPLETED);
+        onAudioChangeBackgroundEvent!(AudioPlayerState.COMPLETED);
       }
     } else {
       assert(false, "No handler defined for method type: '${call.method}'");
@@ -156,6 +169,9 @@ class AudioPlayer {
   final StreamController<String> _errorController =
       StreamController<String>.broadcast();
 
+  final StreamController<PlayerControlCommand> _commandController =
+      StreamController<PlayerControlCommand>.broadcast();
+
   PlayingRouteState _playingRouteState = PlayingRouteState.SPEAKERS;
 
   /// Reference [Map] with all the players created by the application.
@@ -167,14 +183,12 @@ class AudioPlayer {
   /// Enables more verbose logging.
   static bool logEnabled = false;
 
-  AudioPlayerState _audioPlayerState;
+  late AudioPlayerState _audioPlayerState;
 
   AudioPlayerState get state => _audioPlayerState;
 
   set state(AudioPlayerState state) {
     _playerStateController.add(state);
-    // ignore: deprecated_member_use_from_same_package
-    audioPlayerStateChangeHandler?.call(state);
     _audioPlayerState = state;
   }
 
@@ -227,56 +241,10 @@ class AudioPlayer {
   /// Events are sent when an unexpected error is thrown in the native code.
   Stream<String> get onPlayerError => _errorController.stream;
 
-  /// Handler of changes on player state.
-  @deprecated
-  AudioPlayerStateChangeHandler audioPlayerStateChangeHandler;
-
-  /// Handler of changes on player position.
+  /// Stream of remote player command send by native side
   ///
-  /// Will continuously update the position of the playback if the status is
-  /// [AudioPlayerState.PLAYING].
-  ///
-  /// You can use it on a progress bar, for instance.
-  ///
-  /// This is deprecated. Use [onAudioPositionChanged] instead.
-  @deprecated
-  TimeChangeHandler positionHandler;
-
-  /// Handler of changes on audio duration.
-  ///
-  /// An event is going to be sent as soon as the audio duration is available
-  /// (it might take a while to download or buffer it).
-  ///
-  /// This is deprecated. Use [onDurationChanged] instead.
-  @deprecated
-  TimeChangeHandler durationHandler;
-
-  /// Handler of player completions.
-  ///
-  /// Events are sent every time an audio is finished, therefore no event is
-  /// sent when an audio is paused or stopped.
-  ///
-  /// [ReleaseMode.LOOP] also sends events to this stream.
-  ///
-  /// This is deprecated. Use [onPlayerCompletion] instead.
-  @deprecated
-  VoidCallback completionHandler;
-
-  /// Handler of seek completion.
-  ///
-  /// An event is going to be sent as soon as the audio seek is finished.
-  ///
-  /// This is deprecated. Use [onSeekComplete] instead.
-  @deprecated
-  SeekHandler seekCompleteHandler;
-
-  /// Handler of player errors.
-  ///
-  /// Events are sent when an unexpected error is thrown in the native code.
-  ///
-  /// This is deprecated. Use [onPlayerError] instead.
-  @deprecated
-  ErrorHandler errorHandler;
+  /// Events are sent user tap system remote control command.
+  Stream<PlayerControlCommand> get onPlayerCommand => _commandController.stream;
 
   /// An unique ID generated for this instance of [AudioPlayer].
   ///
@@ -288,30 +256,27 @@ class AudioPlayer {
   PlayerMode mode;
 
   /// Creates a new instance and assigns an unique id to it.
-  AudioPlayer({this.mode = PlayerMode.MEDIA_PLAYER, this.playerId}) {
-    this.mode ??= PlayerMode.MEDIA_PLAYER;
-    this.playerId ??= _uuid.v4();
+  AudioPlayer({this.mode = PlayerMode.MEDIA_PLAYER, this.playerId = ''}) {
+    this.playerId = this.playerId == '' ? _uuid.v4() : this.playerId;
     players[playerId] = this;
 
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       // Start the headless audio service. The parameter here is a handle to
       // a callback managed by the Flutter engine, which allows for us to pass
       // references to our callbacks between isolates.
-      final CallbackHandle handle =
+      final CallbackHandle? handle =
           PluginUtilities.getCallbackHandle(_backgroundCallbackDispatcher);
       assert(handle != null, 'Unable to lookup callback.');
       _invokeMethod('startHeadlessService', {
-        'handleKey': <dynamic>[handle.toRawHandle()]
+        'handleKey': <dynamic>[handle?.toRawHandle()],
       });
     }
   }
 
   Future<int> _invokeMethod(
     String method, [
-    Map<String, dynamic> arguments,
+    Map<String, dynamic> arguments = const {},
   ]) {
-    arguments ??= const {};
-
     final Map<String, dynamic> withPlayerId = Map.of(arguments)
       ..['playerId'] = playerId
       ..['mode'] = mode.toString();
@@ -324,17 +289,17 @@ class AudioPlayer {
   /// this should be called after initiating AudioPlayer only if you want to
   /// listen for notification changes in the background. Not implemented on macOS
   void startHeadlessService() {
-    if (this == null || playerId.isEmpty) {
+    if (playerId.isEmpty) {
       return;
     }
     // Start the headless audio service. The parameter here is a handle to
     // a callback managed by the Flutter engine, which allows for us to pass
     // references to our callbacks between isolates.
-    final CallbackHandle handle =
+    final CallbackHandle? handle =
         PluginUtilities.getCallbackHandle(_backgroundCallbackDispatcher);
     assert(handle != null, 'Unable to lookup callback.');
     _invokeMethod('startHeadlessService', {
-      'handleKey': <dynamic>[handle.toRawHandle()]
+      'handleKey': <dynamic>[handle?.toRawHandle()]
     });
 
     return;
@@ -345,14 +310,12 @@ class AudioPlayer {
   /// `callback` is invoked on a background isolate and will not have direct
   /// access to the state held by the main isolate (or any other isolate).
   Future<bool> monitorNotificationStateChanges(
-      void Function(AudioPlayerState value) callback) async {
-    if (callback == null) {
-      throw ArgumentError.notNull('callback');
-    }
-    final CallbackHandle handle = PluginUtilities.getCallbackHandle(callback);
-
+    void Function(AudioPlayerState value) callback,
+  ) async {
+    final CallbackHandle? handle = PluginUtilities.getCallbackHandle(callback);
+    assert(handle != null, 'Unable to lookup callback.');
     await _invokeMethod('monitorNotificationStateChanges', {
-      'handleMonitorKey': <dynamic>[handle.toRawHandle()]
+      'handleMonitorKey': <dynamic>[handle?.toRawHandle()]
     });
 
     return true;
@@ -364,18 +327,18 @@ class AudioPlayer {
   /// If [isLocal] is false, [url] must be a remote URL.
   ///
   /// respectSilence and stayAwake are not implemented on macOS.
-  Future<int> play(String url,
-      {bool isLocal,
-      double volume = 1.0,
-      // position must be null by default to be compatible with radio streams
-      Duration position,
-      bool respectSilence = false,
-      bool stayAwake = false,
-      bool recordingActive = false}) async {
+  Future<int> play(
+    String url, {
+    bool? isLocal,
+    double volume = 1.0,
+    // position must be null by default to be compatible with radio streams
+    Duration? position,
+    bool respectSilence = false,
+    bool stayAwake = false,
+    bool duckAudio = false,
+    bool recordingActive = false,
+  }) async {
     isLocal ??= isLocalUrl(url);
-    volume ??= 1.0;
-    respectSilence ??= false;
-    stayAwake ??= false;
 
     final int result = await _invokeMethod('play', {
       'url': url,
@@ -384,7 +347,45 @@ class AudioPlayer {
       'position': position?.inMilliseconds,
       'respectSilence': respectSilence,
       'stayAwake': stayAwake,
-      'recordingActive': recordingActive
+      'duckAudio': duckAudio,
+      'recordingActive': recordingActive,
+    });
+
+    if (result == 1) {
+      state = AudioPlayerState.PLAYING;
+    }
+
+    return result;
+  }
+
+  /// Plays audio in the form of a byte array.
+  ///
+  /// This is only supported on Android currently.
+  Future<int> playBytes(
+    Uint8List bytes, {
+    double volume = 1.0,
+    // position must be null by default to be compatible with radio streams
+    Duration? position,
+    bool respectSilence = false,
+    bool stayAwake = false,
+    bool duckAudio = false,
+    bool recordingActive = false,
+  }) async {
+    if (!Platform.isAndroid) {
+      throw PlatformException(
+        code: 'Not supported',
+        message: 'Only Android is currently supported',
+      );
+    }
+
+    final int result = await _invokeMethod('playBytes', {
+      'bytes': bytes,
+      'volume': volume,
+      'position': position?.inMilliseconds,
+      'respectSilence': respectSilence,
+      'stayAwake': stayAwake,
+      'duckAudio': duckAudio,
+      'recordingActive': recordingActive,
     });
 
     if (result == 1) {
@@ -484,24 +485,29 @@ class AudioPlayer {
   /// Sets the notification bar for lock screen and notification area in iOS for now.
   ///
   /// Specify atleast title
-  Future<dynamic> setNotification(
-      {String title,
-      String albumTitle,
-      String artist,
-      String imageUrl,
-      Duration forwardSkipInterval,
-      Duration backwardSkipInterval,
-      Duration duration,
-      Duration elapsedTime}) {
+  Future<dynamic> setNotification({
+    String title = '',
+    String albumTitle = '',
+    String artist = '',
+    String imageUrl = '',
+    Duration forwardSkipInterval = Duration.zero,
+    Duration backwardSkipInterval = Duration.zero,
+    Duration duration = Duration.zero,
+    Duration elapsedTime = Duration.zero,
+    bool hasPreviousTrack = false,
+    bool hasNextTrack = false,
+  }) {
     return _invokeMethod('setNotification', {
-      'title': title ?? '',
-      'albumTitle': albumTitle ?? '',
-      'artist': artist ?? '',
-      'imageUrl': imageUrl ?? '',
-      'forwardSkipInterval': forwardSkipInterval?.inSeconds ?? 30,
-      'backwardSkipInterval': backwardSkipInterval?.inSeconds ?? 30,
-      'duration': duration?.inSeconds ?? 0,
-      'elapsedTime': elapsedTime?.inSeconds ?? 0
+      'title': title,
+      'albumTitle': albumTitle,
+      'artist': artist,
+      'imageUrl': imageUrl,
+      'forwardSkipInterval': forwardSkipInterval.inSeconds,
+      'backwardSkipInterval': backwardSkipInterval.inSeconds,
+      'duration': duration.inSeconds,
+      'elapsedTime': elapsedTime.inSeconds,
+      'hasPreviousTrack': hasPreviousTrack,
+      'hasNextTrack': hasNextTrack
     });
   }
 
@@ -513,11 +519,16 @@ class AudioPlayer {
   /// this method.
   ///
   /// respectSilence is not implemented on macOS.
-  Future<int> setUrl(String url,
-      {bool isLocal: false, bool respectSilence = false}) {
+  Future<int> setUrl(
+    String url, {
+    bool isLocal: false,
+    bool respectSilence = false,
+  }) {
     isLocal = isLocalUrl(url);
-    return _invokeMethod('setUrl',
-        {'url': url, 'isLocal': isLocal, 'respectSilence': respectSilence});
+    return _invokeMethod(
+      'setUrl',
+      {'url': url, 'isLocal': isLocal, 'respectSilence': respectSilence},
+    );
   }
 
   /// Get audio duration after setting url.
@@ -547,7 +558,7 @@ class AudioPlayer {
     _log('_platformCallHandler call ${call.method} $callArgs');
 
     final playerId = callArgs['playerId'] as String;
-    final AudioPlayer player = players[playerId];
+    final AudioPlayer? player = players[playerId];
 
     if (!kReleaseMode && Platform.isAndroid && player == null) {
       final oldPlayer = AudioPlayer(playerId: playerId);
@@ -556,6 +567,7 @@ class AudioPlayer {
       players.remove(playerId);
       return;
     }
+    if (player == null) return;
 
     final value = callArgs['value'];
 
@@ -568,31 +580,27 @@ class AudioPlayer {
       case 'audio.onDuration':
         Duration newDuration = Duration(milliseconds: value);
         player._durationController.add(newDuration);
-        // ignore: deprecated_member_use_from_same_package
-        player.durationHandler?.call(newDuration);
         break;
       case 'audio.onCurrentPosition':
         Duration newDuration = Duration(milliseconds: value);
         player._positionController.add(newDuration);
-        // ignore: deprecated_member_use_from_same_package
-        player.positionHandler?.call(newDuration);
         break;
       case 'audio.onComplete':
         player.state = AudioPlayerState.COMPLETED;
         player._completionController.add(null);
-        // ignore: deprecated_member_use_from_same_package
-        player.completionHandler?.call();
         break;
       case 'audio.onSeekComplete':
         player._seekCompleteController.add(value);
-        // ignore: deprecated_member_use_from_same_package
-        player.seekCompleteHandler?.call(value);
         break;
       case 'audio.onError':
         player.state = AudioPlayerState.STOPPED;
         player._errorController.add(value);
-        // ignore: deprecated_member_use_from_same_package
-        player.errorHandler?.call(value);
+        break;
+      case 'audio.onGotNextTrackCommand':
+        player._commandController.add(PlayerControlCommand.NEXT_TRACK);
+        break;
+      case 'audio.onGotPreviousTrackCommand':
+        player._commandController.add(PlayerControlCommand.PREVIOUS_TRACK);
         break;
       case 'audio.audioFocus':
         if(value == "AUDIOFOCUS_LOSS"){
@@ -633,6 +641,7 @@ class AudioPlayer {
     if (!_errorController.isClosed) futures.add(_errorController.close());
 
     await Future.wait(futures);
+    players.remove(playerId);
   }
 
   Future<int> earpieceOrSpeakersToggle() async {

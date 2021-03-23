@@ -2,18 +2,17 @@ import 'dart:async';
 import 'dart:html';
 
 import 'package:audioplayers/audioplayers.dart';
-
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 
 class WrappedPlayer {
-  double pausedAt;
+  double? pausedAt;
   double currentVolume = 1.0;
   ReleaseMode currentReleaseMode = ReleaseMode.RELEASE;
-  String currentUrl;
+  String? currentUrl;
   bool isPlaying = false;
 
-  AudioElement player;
+  AudioElement? player;
 
   void setUrl(String url) {
     currentUrl = url;
@@ -35,8 +34,8 @@ class WrappedPlayer {
       return;
     }
     player = AudioElement(currentUrl);
-    player.loop = shouldLoop();
-    player.volume = currentVolume;
+    player?.loop = shouldLoop();
+    player?.volume = currentVolume;
   }
 
   bool shouldLoop() => currentReleaseMode == ReleaseMode.LOOP;
@@ -59,8 +58,8 @@ class WrappedPlayer {
     if (player == null) {
       recreateNode();
     }
-    player.play();
-    player.currentTime = position;
+    player?.play();
+    player?.currentTime = position;
   }
 
   void resume() {
@@ -68,7 +67,7 @@ class WrappedPlayer {
   }
 
   void pause() {
-    pausedAt = player.currentTime;
+    pausedAt = player?.currentTime as double?;
     _cancel();
   }
 
@@ -94,7 +93,7 @@ class AudioplayersPlugin {
     final MethodChannel channel = MethodChannel(
       'xyz.luan/audioplayers',
       const StandardMethodCodec(),
-      registrar.messenger,
+      registrar,
     );
 
     final AudioplayersPlugin instance = AudioplayersPlugin();

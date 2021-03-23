@@ -29,7 +29,7 @@ class ExampleApp extends StatefulWidget {
 class _ExampleAppState extends State<ExampleApp> {
   AudioCache audioCache = AudioCache();
   AudioPlayer advancedPlayer = AudioPlayer();
-  String localFilePath;
+  String? localFilePath;
 
   @override
   void initState() {
@@ -40,51 +40,49 @@ class _ExampleAppState extends State<ExampleApp> {
       return;
     }
     if (Platform.isIOS) {
-      if (audioCache.fixedPlayer != null) {
-        audioCache.fixedPlayer.startHeadlessService();
-      }
+      audioCache.fixedPlayer?.startHeadlessService();
       advancedPlayer.startHeadlessService();
     }
   }
 
   Future _loadFile() async {
-    final bytes = await readBytes(kUrl1);
+    final bytes = await readBytes(Uri.parse(kUrl1));
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/audio.mp3');
 
     await file.writeAsBytes(bytes);
     if (await file.exists()) {
-      setState(() {
-        localFilePath = file.path;
-      });
+      setState(() => localFilePath = file.path);
     }
   }
 
   Widget remoteUrl() {
     return SingleChildScrollView(
-      child: _Tab(children: [
-        Text(
-          'Sample 1 ($kUrl1)',
-          key: Key('url1'),
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        PlayerWidget(url: kUrl1),
-        Text(
-          'Sample 2 ($kUrl2)',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        PlayerWidget(url: kUrl2),
-        Text(
-          'Sample 3 ($kUrl3)',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        PlayerWidget(url: kUrl3),
-        Text(
-          'Sample 4 (Low Latency mode) ($kUrl1)',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        PlayerWidget(url: kUrl1, mode: PlayerMode.LOW_LATENCY),
-      ]),
+      child: _Tab(
+        children: [
+          Text(
+            'Sample 1 ($kUrl1)',
+            key: Key('url1'),
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          PlayerWidget(url: kUrl1),
+          Text(
+            'Sample 2 ($kUrl2)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          PlayerWidget(url: kUrl2),
+          Text(
+            'Sample 3 ($kUrl3)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          PlayerWidget(url: kUrl3),
+          Text(
+            'Sample 4 (Low Latency mode) ($kUrl1)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          PlayerWidget(url: kUrl1, mode: PlayerMode.LOW_LATENCY),
+        ],
+      ),
     );
   }
 
@@ -93,42 +91,62 @@ class _ExampleAppState extends State<ExampleApp> {
       Text('File: $kUrl1'),
       _Btn(txt: 'Download File to your Device', onPressed: () => _loadFile()),
       Text('Current local file path: $localFilePath'),
-      localFilePath == null
-          ? Container()
-          : PlayerWidget(
-              url: localFilePath,
-            ),
+      localFilePath == null ? Container() : PlayerWidget(url: localFilePath!),
     ]);
   }
 
   Widget localAsset() {
     return SingleChildScrollView(
-      child: _Tab(children: [
-        Text('Play Local Asset \'audio.mp3\':'),
-        _Btn(txt: 'Play', onPressed: () => audioCache.play('audio.mp3')),
-        Text('Loop Local Asset \'audio.mp3\':'),
-        _Btn(txt: 'Loop', onPressed: () => audioCache.loop('audio.mp3')),
-        Text('Play Local Asset \'audio2.mp3\':'),
-        _Btn(txt: 'Play', onPressed: () => audioCache.play('audio2.mp3')),
-        Text('Play Local Asset In Low Latency \'audio.mp3\':'),
-        _Btn(
-            txt: 'Play',
-            onPressed: () =>
-                audioCache.play('audio.mp3', mode: PlayerMode.LOW_LATENCY)),
-        Text('Play Local Asset Concurrently In Low Latency \'audio.mp3\':'),
-        _Btn(
+      child: _Tab(
+        children: [
+          Text('Play Local Asset \'audio.mp3\':'),
+          _Btn(txt: 'Play', onPressed: () => audioCache.play('audio.mp3')),
+          Text('Play Local Asset (via byte source) \'audio.mp3\':'),
+          _Btn(
             txt: 'Play',
             onPressed: () async {
-              await audioCache.play('audio.mp3', mode: PlayerMode.LOW_LATENCY);
-              await audioCache.play('audio2.mp3', mode: PlayerMode.LOW_LATENCY);
-            }),
-        Text('Play Local Asset In Low Latency \'audio2.mp3\':'),
-        _Btn(
+              var bytes =
+                  await (await audioCache.load('audio.mp3')).readAsBytes();
+              audioCache.playBytes(bytes);
+            },
+          ),
+          Text('Loop Local Asset \'audio.mp3\':'),
+          _Btn(txt: 'Loop', onPressed: () => audioCache.loop('audio.mp3')),
+          Text('Loop Local Asset (via byte source) \'audio.mp3\':'),
+          _Btn(
+            txt: 'Loop',
+            onPressed: () async {
+              var bytes =
+                  await (await audioCache.load('audio.mp3')).readAsBytes();
+              audioCache.playBytes(bytes, loop: true);
+            },
+          ),
+          Text('Play Local Asset \'audio2.mp3\':'),
+          _Btn(txt: 'Play', onPressed: () => audioCache.play('audio2.mp3')),
+          Text('Play Local Asset In Low Latency \'audio.mp3\':'),
+          _Btn(
             txt: 'Play',
             onPressed: () =>
-                audioCache.play('audio2.mp3', mode: PlayerMode.LOW_LATENCY)),
-        getLocalFileDuration(),
-      ]),
+                audioCache.play('audio.mp3', mode: PlayerMode.LOW_LATENCY),
+          ),
+          Text('Play Local Asset Concurrently In Low Latency \'audio.mp3\':'),
+          _Btn(
+              txt: 'Play',
+              onPressed: () async {
+                await audioCache.play('audio.mp3',
+                    mode: PlayerMode.LOW_LATENCY);
+                await audioCache.play('audio2.mp3',
+                    mode: PlayerMode.LOW_LATENCY);
+              }),
+          Text('Play Local Asset In Low Latency \'audio2.mp3\':'),
+          _Btn(
+            txt: 'Play',
+            onPressed: () =>
+                audioCache.play('audio2.mp3', mode: PlayerMode.LOW_LATENCY),
+          ),
+          getLocalFileDuration(),
+        ],
+      ),
     );
   }
 
@@ -138,7 +156,9 @@ class _ExampleAppState extends State<ExampleApp> {
       audiofile.path,
     );
     int duration = await Future.delayed(
-        Duration(seconds: 2), () => advancedPlayer.getDuration());
+      Duration(seconds: 2),
+      () => advancedPlayer.getDuration(),
+    );
     return duration;
   }
 
@@ -155,9 +175,11 @@ class _ExampleAppState extends State<ExampleApp> {
           case ConnectionState.done:
             if (snapshot.hasError) return Text('Error: ${snapshot.error}');
             return Text(
-                'audio2.mp3 duration is: ${Duration(milliseconds: snapshot.data)}');
+              'audio2.mp3 duration is: ${Duration(milliseconds: snapshot.data!)}',
+            );
+          default:
+            return Container();
         }
-        return null; // unreachable
       },
     );
   }
@@ -166,9 +188,9 @@ class _ExampleAppState extends State<ExampleApp> {
     return _Tab(children: [
       Text('Play notification sound: \'messenger.mp3\':'),
       _Btn(
-          txt: 'Play',
-          onPressed: () =>
-              audioCache.play('messenger.mp3', isNotification: true)),
+        txt: 'Play',
+        onPressed: () => audioCache.play('messenger.mp3', isNotification: true),
+      ),
     ]);
   }
 
@@ -201,9 +223,7 @@ class _ExampleAppState extends State<ExampleApp> {
               localFile(),
               localAsset(),
               notification(),
-              Advanced(
-                advancedPlayer: advancedPlayer,
-              )
+              Advanced(advancedPlayer: advancedPlayer),
             ],
           ),
         ),
@@ -215,19 +235,19 @@ class _ExampleAppState extends State<ExampleApp> {
 class Advanced extends StatefulWidget {
   final AudioPlayer advancedPlayer;
 
-  const Advanced({Key key, this.advancedPlayer}) : super(key: key);
+  const Advanced({Key? key, required this.advancedPlayer}) : super(key: key);
 
   @override
   _AdvancedState createState() => _AdvancedState();
 }
 
 class _AdvancedState extends State<Advanced> {
-  bool seekDone;
+  bool? seekDone;
 
   @override
   void initState() {
-    widget.advancedPlayer.seekCompleteHandler =
-        (finished) => setState(() => seekDone = finished);
+    widget.advancedPlayer.onSeekComplete
+        .listen((event) => setState(() => seekDone = true));
     super.initState();
   }
 
@@ -237,129 +257,153 @@ class _AdvancedState extends State<Advanced> {
     return SingleChildScrollView(
       child: _Tab(
         children: [
-          Column(children: [
-            Text('Source Url'),
-            Row(children: [
-              _Btn(
+          Column(
+            children: [
+              Text('Source Url'),
+              Row(children: [
+                _Btn(
                   txt: 'Audio 1',
-                  onPressed: () => widget.advancedPlayer.setUrl(kUrl1)),
-              _Btn(
+                  onPressed: () => widget.advancedPlayer.setUrl(kUrl1),
+                ),
+                _Btn(
                   txt: 'Audio 2',
-                  onPressed: () => widget.advancedPlayer.setUrl(kUrl2)),
-              _Btn(
+                  onPressed: () => widget.advancedPlayer.setUrl(kUrl2),
+                ),
+                _Btn(
                   txt: 'Stream',
-                  onPressed: () => widget.advancedPlayer.setUrl(kUrl3)),
-            ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
-          ]),
-          Column(children: [
-            Text('Release Mode'),
-            Row(children: [
-              _Btn(
+                  onPressed: () => widget.advancedPlayer.setUrl(kUrl3),
+                ),
+              ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
+            ],
+          ),
+          Column(
+            children: [
+              Text('Release Mode'),
+              Row(children: [
+                _Btn(
                   txt: 'STOP',
                   onPressed: () =>
-                      widget.advancedPlayer.setReleaseMode(ReleaseMode.STOP)),
-              _Btn(
+                      widget.advancedPlayer.setReleaseMode(ReleaseMode.STOP),
+                ),
+                _Btn(
                   txt: 'LOOP',
                   onPressed: () =>
-                      widget.advancedPlayer.setReleaseMode(ReleaseMode.LOOP)),
-              _Btn(
+                      widget.advancedPlayer.setReleaseMode(ReleaseMode.LOOP),
+                ),
+                _Btn(
                   txt: 'RELEASE',
-                  onPressed: () => widget.advancedPlayer
-                      .setReleaseMode(ReleaseMode.RELEASE)),
-            ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
-          ]),
-          Column(children: [
-            Text('Volume'),
-            Row(children: [
-              _Btn(
-                  txt: '0.0',
-                  onPressed: () => widget.advancedPlayer.setVolume(0.0)),
-              _Btn(
-                  txt: '0.5',
-                  onPressed: () => widget.advancedPlayer.setVolume(0.5)),
-              _Btn(
-                  txt: '1.0',
-                  onPressed: () => widget.advancedPlayer.setVolume(1.0)),
-              _Btn(
-                  txt: '2.0',
-                  onPressed: () => widget.advancedPlayer.setVolume(2.0)),
-            ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
-          ]),
-          Column(children: [
-            Text('Control'),
-            Row(children: [
-              _Btn(
-                  txt: 'resume',
-                  onPressed: () => widget.advancedPlayer.resume()),
-              _Btn(
-                  txt: 'pause', onPressed: () => widget.advancedPlayer.pause()),
-              _Btn(txt: 'stop', onPressed: () => widget.advancedPlayer.stop()),
-              _Btn(
-                  txt: 'release',
-                  onPressed: () => widget.advancedPlayer.release()),
-            ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
-          ]),
-          Column(children: [
-            Text('Seek in milliseconds'),
-            Row(children: [
-              _Btn(
-                  txt: '100ms',
-                  onPressed: () {
-                    widget.advancedPlayer.seek(Duration(
-                        milliseconds: audioPosition.inMilliseconds + 100));
-                    setState(() => seekDone = false);
-                  }),
-              _Btn(
-                  txt: '500ms',
-                  onPressed: () {
-                    widget.advancedPlayer.seek(Duration(
-                        milliseconds: audioPosition.inMilliseconds + 500));
-                    setState(() => seekDone = false);
-                  }),
-              _Btn(
-                  txt: '1s',
-                  onPressed: () {
-                    widget.advancedPlayer
-                        .seek(Duration(seconds: audioPosition.inSeconds + 1));
-                    setState(() => seekDone = false);
-                  }),
-              _Btn(
-                  txt: '1.5s',
-                  onPressed: () {
-                    widget.advancedPlayer.seek(Duration(
-                        milliseconds: audioPosition.inMilliseconds + 1500));
-                    setState(() => seekDone = false);
-                  }),
-            ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
-          ]),
-          Column(children: [
-            Text('Rate'),
-            Row(children: [
-              _Btn(
-                  txt: '0.5',
                   onPressed: () =>
-                      widget.advancedPlayer.setPlaybackRate(playbackRate: 0.5)),
-              _Btn(
-                  txt: '1.0',
-                  onPressed: () =>
-                      widget.advancedPlayer.setPlaybackRate(playbackRate: 1.0)),
-              _Btn(
-                  txt: '1.5',
-                  onPressed: () =>
-                      widget.advancedPlayer.setPlaybackRate(playbackRate: 1.5)),
-              _Btn(
-                  txt: '2.0',
-                  onPressed: () =>
-                      widget.advancedPlayer.setPlaybackRate(playbackRate: 2.0)),
-            ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
-          ]),
+                      widget.advancedPlayer.setReleaseMode(ReleaseMode.RELEASE),
+                ),
+              ], mainAxisAlignment: MainAxisAlignment.spaceEvenly),
+            ],
+          ),
+          Column(
+            children: [
+              Text('Volume'),
+              Row(
+                children: [0.0, 0.5, 1.0, 2.0].map((e) {
+                  return _Btn(
+                    txt: e.toString(),
+                    onPressed: () => widget.advancedPlayer.setVolume(e),
+                  );
+                }).toList(),
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              ),
+            ],
+          ),
+          Column(
+            children: [
+              Text('Control'),
+              Row(
+                children: [
+                  _Btn(
+                    txt: 'resume',
+                    onPressed: () => widget.advancedPlayer.resume(),
+                  ),
+                  _Btn(
+                    txt: 'pause',
+                    onPressed: () => widget.advancedPlayer.pause(),
+                  ),
+                  _Btn(
+                    txt: 'stop',
+                    onPressed: () => widget.advancedPlayer.stop(),
+                  ),
+                  _Btn(
+                    txt: 'release',
+                    onPressed: () => widget.advancedPlayer.release(),
+                  ),
+                ],
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              ),
+            ],
+          ),
+          Column(
+            children: [
+              Text('Seek in milliseconds'),
+              Row(
+                children: [
+                  _Btn(
+                      txt: '100ms',
+                      onPressed: () {
+                        widget.advancedPlayer.seek(
+                          Duration(
+                            milliseconds: audioPosition.inMilliseconds + 100,
+                          ),
+                        );
+                        setState(() => seekDone = false);
+                      }),
+                  _Btn(
+                      txt: '500ms',
+                      onPressed: () {
+                        widget.advancedPlayer.seek(
+                          Duration(
+                            milliseconds: audioPosition.inMilliseconds + 500,
+                          ),
+                        );
+                        setState(() => seekDone = false);
+                      }),
+                  _Btn(
+                      txt: '1s',
+                      onPressed: () {
+                        widget.advancedPlayer.seek(
+                          Duration(seconds: audioPosition.inSeconds + 1),
+                        );
+                        setState(() => seekDone = false);
+                      }),
+                  _Btn(
+                      txt: '1.5s',
+                      onPressed: () {
+                        widget.advancedPlayer.seek(
+                          Duration(
+                            milliseconds: audioPosition.inMilliseconds + 1500,
+                          ),
+                        );
+                        setState(() => seekDone = false);
+                      }),
+                ],
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              ),
+            ],
+          ),
+          Column(
+            children: [
+              Text('Rate'),
+              Row(
+                children: [0.5, 1.0, 1.5, 2.0].map((e) {
+                  return _Btn(
+                    txt: e.toString(),
+                    onPressed: () {
+                      widget.advancedPlayer.setPlaybackRate(playbackRate: e);
+                    },
+                  );
+                }).toList(),
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              ),
+            ],
+          ),
           Text('Audio Position: ${audioPosition}'),
-          seekDone == null
-              ? SizedBox(
-                  width: 0,
-                  height: 0,
-                )
-              : Text(seekDone ? "Seek Done" : "Seeking..."),
+          if (seekDone != null) Text(seekDone! ? 'Seek Done' : 'Seeking...'),
         ],
       ),
     );
@@ -369,7 +413,7 @@ class _AdvancedState extends State<Advanced> {
 class _Tab extends StatelessWidget {
   final List<Widget> children;
 
-  const _Tab({Key key, this.children}) : super(key: key);
+  const _Tab({Key? key, required this.children}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -393,12 +437,14 @@ class _Btn extends StatelessWidget {
   final String txt;
   final VoidCallback onPressed;
 
-  const _Btn({Key key, this.txt, this.onPressed}) : super(key: key);
+  const _Btn({Key? key, required this.txt, required this.onPressed})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return ButtonTheme(
-        minWidth: 48.0,
-        child: RaisedButton(child: Text(txt), onPressed: onPressed));
+      minWidth: 48.0,
+      child: RaisedButton(child: Text(txt), onPressed: onPressed),
+    );
   }
 }
