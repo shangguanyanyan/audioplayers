@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.*
 import android.os.Build
 import android.os.PowerManager
+import java.lang.ref.WeakReference
 
 class WrappedMediaPlayer internal constructor(
         private val ref: AudioplayersPlugin,
@@ -26,17 +27,18 @@ class WrappedMediaPlayer internal constructor(
     private var prepared = false
     private var playing = false
     private var shouldSeekTo = -1
-    private val audioManager: WeakReference<AudioManager>? = null
-    private var audioFocusRequest: AudioFocusRequest? = null
+    private val audioManager: AudioManager
+        get() = ref.getApplicationContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
 
     init {
-        this.audioManager = WeakReference<AudioManager>(audioManager)
+        //this.audioManager = WeakReference<AudioManager>(audioManager)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val audioAttributes: AudioAttributes = Builder()
+            val audioAttributes: AudioAttributes = AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_GAME)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build()
-            audioFocusRequest = Builder(AudioManager.AUDIOFOCUS_GAIN)
+            audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(audioAttributes)
                     .setAcceptsDelayedFocusGain(true)
                     .setOnAudioFocusChangeListener(this)
@@ -45,10 +47,10 @@ class WrappedMediaPlayer internal constructor(
     }
 
     private fun requestAudioFocus() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            val res: Int = audioManager.get().requestAudioFocus(audioFocusRequest)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val res: Int = audioManager.requestAudioFocus(this.audioFocusRequest!!)
         } else {
-            val res: Int = audioManager.get().requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            val res: Int = audioManager.requestAudioFocus(this, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
             when (res) {
                 AudioManager.AUDIOFOCUS_REQUEST_GRANTED -> {
                 }
@@ -65,14 +67,13 @@ class WrappedMediaPlayer internal constructor(
     private fun abandonFocus() {
         val res: Int
         res = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioManager.get().abandonAudioFocusRequest(audioFocusRequest)
+            audioManager.abandonAudioFocusRequest(audioFocusRequest!!)
         } else {
-            audioManager.get().abandonAudioFocus(this)
+            audioManager.abandonAudioFocus(this)
         }
     }
 
-    @Override
-    fun onAudioFocusChange(focusChange: Int) {
+    override fun onAudioFocusChange(focusChange: Int) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_GAIN ->
                 // 标记自己获取到焦点
@@ -225,9 +226,6 @@ class WrappedMediaPlayer internal constructor(
     override fun isActuallyPlaying(): Boolean {
         return playing && prepared
     }
-
-    private val audioManager: AudioManager
-        get() = ref.getApplicationContext().getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     /**
      * Playback handling methods

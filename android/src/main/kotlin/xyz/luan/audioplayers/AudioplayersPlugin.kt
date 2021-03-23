@@ -1,6 +1,7 @@
 package xyz.luan.audioplayers
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.Handler
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
@@ -175,11 +176,11 @@ class AudioplayersPlugin : MethodCallHandler, FlutterPlugin {
         handler.removeCallbacksAndMessages(null)
     }
 
-    fun handleAudioFocusState(player: Player, state: Int) {
+    fun handleAudioFocusState(player: WrappedMediaPlayer, state: Int) {
         if (state == AudioManager.AUDIOFOCUS_LOSS) {
-            channel.invokeMethod("audio.audioFocus", buildArguments(player.getPlayerId(), "AUDIOFOCUS_LOSS"))
+            channel.invokeMethod("audio.audioFocus", buildArguments(player.playerId, "AUDIOFOCUS_LOSS"))
         } else if (state == AudioManager.AUDIOFOCUS_GAIN) {
-            channel.invokeMethod("audio.audioFocus", buildArguments(player.getPlayerId(), "AUDIOFOCUS_GAIN"))
+            channel.invokeMethod("audio.audioFocus", buildArguments(player.playerId, "AUDIOFOCUS_GAIN"))
         }
     }
 
